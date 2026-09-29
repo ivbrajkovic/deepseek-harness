@@ -17,11 +17,8 @@ import type { TeamRoster } from './roster.ts'
 import { resolveActiveMember } from './roster.ts'
 import { messageAccepted } from './session-message.ts'
 import { TeamId, TeamMessageId } from './types.ts'
-import type {
-  SendTeamMessageRequest,
-  SendTeamMessageResult,
-  TeamMessageSnapshot,
-} from './types.ts'
+import type { TeamMessageSnapshot } from './types.ts'
+import type { SendTeamMessageRequest, SendTeamMessageResult } from './requests.ts'
 
 /** Owns every process-local state transition for the durable Team mailbox. */
 export class TeamMailbox {

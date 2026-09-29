@@ -71,6 +71,7 @@ const teamMemberSnapshotSchema = z.object({
   provider: z.string(),
   context: z.enum(['fresh', 'fork']),
   phase: z.enum(['provisioning', 'active', 'failed']),
+  model: z.string().optional(),
   error: z.string().optional(),
 }).strict() as z.ZodType<TeamMemberSnapshot>
 
@@ -386,7 +387,7 @@ export function teamProjectionView(state: TeamProjectionState): TeamProjection {
 /** Team projection selected by the projected Session identity; the wire view carries durable roster and task state only. */
 export const teamProjectionDefinition = {
   key: 'agentTeam',
-  stateVersion: 4,
+  stateVersion: 5,
   stateSchema: teamProjectionEntrySchema,
   init: header => emptyTeamState(header.id),
   apply: applyProjectionEvent,

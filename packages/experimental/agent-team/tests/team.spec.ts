@@ -232,6 +232,26 @@ describe('Team identity and provisioning', () => {
     await expect(spawn(ctx, lead, 'fresh-worker')).rejects.toMatchObject({ code: 'TEAM_MEMBER_NAME_TAKEN' })
   })
 
+  it('routes one teammate onto requested agent options and keeps the model durable', async () => {
+    const { ctx, lead, adapter } = await setup([textResponse('routed answer')])
+    const routed = await ctx.agentTeams.spawnTeammate(lead, {
+      name: 'routed-worker',
+      description: 'routed responsibility',
+      prompt: content('routed initial'),
+      context: 'fresh',
+      provider: 'spawn',
+      agentOptions: { provider: 'mock', model: 'mock-strong' },
+      signal: SIGNAL,
+    })
+    expect(routed.member).toMatchObject({ name: 'routed-worker', model: 'mock-strong' })
+    await waitNoAgent(ctx, routed.member.id)
+    const request = adapter.requests.find(candidate => candidate.sessionId === routed.member.id)
+    expect(request).toMatchObject({ provider: 'mock', model: 'mock-strong' })
+    // The stored roster row owns display once the child is no longer live.
+    expect(ctx.agentTeams.listMembers(lead)[1]).toMatchObject({ name: 'routed-worker', model: 'mock-strong' })
+    expect(durable(lead).members[0]).toMatchObject({ name: 'routed-worker', model: 'mock-strong' })
+  })
+
   it('flushes the accepted child prompt before committing the active roster edge', async () => {
     const { ctx, lead } = await setup([textResponse('checkpointed child answer')])
     const flush = ctx.sessions.flush.bind(ctx.sessions)

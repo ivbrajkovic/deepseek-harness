@@ -14,20 +14,19 @@ import { TeamRoster } from './roster.ts'
 import type { TeamMembership } from './roster.ts'
 import { TeamTaskBoard } from './task-board.ts'
 import { TeamId, TeamTaskId } from './types.ts'
+import type { Config, TeamMemberView, TeamTaskView } from './types.ts'
 import type {
-  Config,
   CreateTeamTaskRequest,
   SendTeamMessageRequest,
   SendTeamMessageResult,
   SpawnTeammateRequest,
   SpawnTeammateResult,
-  TeamMemberView,
-  TeamTaskView,
   TeamWaitResult,
   UpdateTeamTaskRequest,
-} from './types.ts'
+} from './requests.ts'
 
 export type * from './types.ts'
+export type * from './requests.ts'
 export type { TeamMembership } from './roster.ts'
 export { TeamId, TeamMessageId, TeamTaskId } from './types.ts'
 export { TeamError } from './error.ts'
@@ -144,7 +143,7 @@ export class TeamService extends Service {
   /**
    * Create one named, continuable direct child of the Team Lead.
    * @param caller - exact live Lead Agent.
-   * @param request - immutable name, description, prompt, context mode, provider, and cancellation.
+   * @param request - immutable name, description, prompt, context mode, provider, optional child route overrides, and cancellation.
    * @returns the active roster row.
    */
   async spawnTeammate(caller: Agent, request: SpawnTeammateRequest): Promise<SpawnTeammateResult> {

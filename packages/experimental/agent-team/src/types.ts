@@ -1,4 +1,4 @@
-/** Public Agent Teams identities, durable records, and service request values. */
+/** Public Agent Teams identities and durable records; request values live in the host-facing `requests.ts`. */
 
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
@@ -51,6 +51,8 @@ export interface TeamMemberSnapshot {
   readonly provider: string
   readonly context: 'fresh' | 'fork'
   readonly phase: TeamMemberPhase
+  /** Child model resolved at creation; the full route stays in the child's own subagent descriptor. */
+  readonly model?: string
   readonly error?: string
 }
 
@@ -160,70 +162,6 @@ export interface Config {
   readonly maxMessageBytes?: number
   /** Maximum milliseconds allowed for Team-owned runtime disposal. */
   readonly disposalTimeoutMs?: number
-}
-
-/** Input for creating one durable teammate. */
-export interface SpawnTeammateRequest {
-  readonly name: string
-  readonly description: string
-  readonly prompt: ContentBlock[]
-  readonly context: 'fresh' | 'fork'
-  readonly provider: string
-  readonly signal: AbortSignal
-}
-
-/** Result after one teammate reaches a durable active or failed edge. */
-export interface SpawnTeammateResult {
-  readonly member: TeamMemberView
-}
-
-/** Input for one durable peer message. */
-export interface SendTeamMessageRequest {
-  readonly target: string
-  readonly content: ContentBlock[]
-  readonly signal: AbortSignal
-}
-
-/** Result after a peer message enters the durable mailbox. */
-export interface SendTeamMessageResult {
-  readonly messageId: TeamMessageId
-  readonly status: 'accepted' | 'queued'
-}
-
-/** Input for creating one shared task. */
-export interface CreateTeamTaskRequest {
-  readonly subject: string
-  readonly description: string
-  readonly blockedBy?: readonly TeamTaskId[]
-  readonly writeScopes?: readonly string[]
-}
-
-/** Supported task mutation actions. */
-export type TeamTaskAction =
-  | 'claim'
-  | 'release'
-  | 'edit'
-  | 'set_dependencies'
-  | 'complete'
-  | 'reopen'
-  | 'reassign'
-  | 'delete'
-
-/** Compare-and-set mutation of one shared task. */
-export interface UpdateTeamTaskRequest {
-  readonly taskId: TeamTaskId
-  readonly expectedRevision: number
-  readonly action: TeamTaskAction
-  readonly subject?: string
-  readonly description?: string
-  readonly blockedBy?: readonly TeamTaskId[]
-  readonly writeScopes?: readonly string[]
-  readonly owner?: string
-}
-
-/** Result of waiting for Team activity. */
-export interface TeamWaitResult {
-  readonly timedOut: boolean
 }
 
 declare module '@deepseek-ai/dsh-session/types' {

@@ -225,6 +225,8 @@ for (const backend of backends) {
         expect(failedMember?.phase).toBe('failed')
         expect(failedMember?.error).toContain('child Session recovery failed')
       }, { timeout: 5_000 })
+      // Reconciliation restores the child's creation route, not the resumed Lead's.
+      expect(durable(activeHandle.agent).members[0]).toMatchObject({ phase: 'active', model: 'mock' })
 
       const receipt = await second.ctx.agentTeams.sendMessage(activeHandle.agent, {
         target: 'recoverable',
