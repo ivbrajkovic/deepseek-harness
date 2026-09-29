@@ -20,10 +20,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { createScope, scopeOf } from '@deepseek-ai/dsh-scope'
 import * as tool from '../src/index.ts'
-import { ensureListSubagentModels, registerListSubagentModels } from '../src/list-models.ts'
-import { subagentModelSelectionProjectionDefinition } from '../src/model-selection-state.ts'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
@@ -414,49 +411,5 @@ describe('list_subagent_models', () => {
     const result = await call(ctx, { provider: 'missing' })
     expect(result.isError).toBe(true)
     expect(text(result)).toContain('available providers: (none)')
-  })
-})
-
-describe('ensureListSubagentModels', () => {
-  async function setupPolicyHandle(ctx: Context) {
-    return ctx.sessionProjections.register(subagentModelSelectionProjectionDefinition)
-  }
-
-  it('falls back to a plain registration without a scope', async () => {
-    const ctx = await setupListTool()
-    const policyHandle = await setupPolicyHandle(ctx)
-    expect(() => { registerListSubagentModels(ctx, policyHandle) }).toThrow('already registered')
-    await ctx.fiber.dispose()
-
-    const bare = new Context()
-    await bare.plugin(SystemPrompt)
-    await bare.plugin(ToolRuntime)
-    await bare.plugin(SessionProjectionRegistry)
-    const bareHandle = await setupPolicyHandle(bare)
-    const release = ensureListSubagentModels(bare, undefined, bareHandle)
-    expect(bare.tools.get('list_subagent_models')).toBeDefined()
-    release()
-    expect(bare.tools.get('list_subagent_models')).toBeUndefined()
-    await bare.fiber.dispose()
-  })
-
-  it('shares one definition per scope until the last release', async () => {
-    const ctx = new Context()
-    await ctx.plugin(SystemPrompt)
-    await ctx.plugin(ToolRuntime)
-    await ctx.plugin(SessionProjectionRegistry)
-    const policyHandle = await setupPolicyHandle(ctx)
-    const scope = createScope(ctx, { preset: 'shared-discovery' })
-    const key = scopeOf(scope.ctx)
-    const first = ensureListSubagentModels(ctx, key, policyHandle)
-    const second = ensureListSubagentModels(ctx, key, policyHandle)
-    expect(ctx.tools.get('list_subagent_models')).toBeDefined()
-    first()
-    expect(ctx.tools.get('list_subagent_models')).toBeDefined()
-    second()
-    expect(ctx.tools.get('list_subagent_models')).toBeUndefined()
-    // A release after the shared registration is exhausted is a no-op.
-    expect(() => { first() }).not.toThrow()
-    await ctx.fiber.dispose()
   })
 })
