@@ -252,6 +252,23 @@
       }
     },
     {
+      "name": "list_subagent_models",
+      "description": "Discover LLM routes for subagents without changing the current Agent. Call with no arguments to list registered providers, with `provider` to list its advertised models, or with `provider` and `model` to inspect that exact model and its reasoning efforts. Catalog membership is advisory: an adapter may accept an unlisted model id. Use the returned ids with a delegation tool's `provider`, `model`, and `reasoning_effort` fields.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "Registered LLM provider id. Omit to list providers."
+          },
+          "model": {
+            "type": "string",
+            "description": "Exact model id to inspect. Requires provider; omit to list that provider's advertised models."
+          }
+        }
+      }
+    },
+    {
       "name": "read",
       "description": "Read a UTF-8 text file and return line-numbered content.",
       "parameters": {
@@ -330,7 +347,7 @@
     },
     {
       "name": "spawn_teammate",
-      "description": "Create one named, durable teammate. Only the Team Lead may call this tool.",
+      "description": "Create one named, durable teammate. Only the Team Lead may call this tool. Teammate LLM selection is optional. Omit `provider`, `model`, and `reasoning_effort` to inherit the Lead route. Supply `provider` and `model` together after using `list_subagent_models` to inspect advertised routes and efforts. Changing the effective route without naming an effort uses the selected model's default effort.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -353,6 +370,18 @@
               "fresh",
               "fork"
             ]
+          },
+          "provider": {
+            "type": "string",
+            "description": "LLM provider route for the teammate. Supply together with model; omit both to inherit the Lead route."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model id interpreted by provider. Supply together with provider; omit both to inherit the Lead route."
+          },
+          "reasoning_effort": {
+            "type": "string",
+            "description": "Adapter-owned reasoning effort for the effective teammate route. Omit to inherit a compatible Lead effort or use a newly selected model's default."
           }
         },
         "required": [

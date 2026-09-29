@@ -36,6 +36,10 @@ Root 恢复时会把未终结 provisioning 记录与独立持久 child Session �
 
 fresh child 不继承对话。fork child 只捕获一次 Lead 已完成 turn 前缀，并保留为自己的持久 seed。当前 delegation turn 保持排除，与既有 fork provider 契约一致。
 
+## Teammate LLM routes
+
+`spawnTeammate` 接收可选的 child `AgentOptions`，并经由 continuation manager 自身的 `agentOptions` 路径转发，因此解析后的路由会持久化在 child 的 subagent descriptor 中并在冷恢复时还原，Team 侧不存储路由。active `team/member` 快照只记录解析后的 `model` 用于 roster 展示；早于该字段写入的快照按原样重放。模型可见的选择复用 subagent 工具的机制：`tool-agent-team` 通过 `dsh-tool-subagent` 导出的帮助函数采样同一个 Host `subagent-model-selection` 设置，为每个 Session 记录同一条持久的 `subagent/model-selection-policy` 事件，执行同一个路由白名单，并与共同挂载的 subagent 选择入口共享每个 scope 一份的 `list_subagent_models` 注册，因此一个用户开关同时治理两个委派入口、同时挂载两者的组合只呈现一个发现定义，且 `dsh-tool-subagent` 的 invariant 在 Team scope 中同样成立。插件挂载时对两个配置的 continuable provider 断言能力；两个进程内 continuable provider 都声明 `agentOptions`，之后注册的缺少该能力的 provider 会拒绝自己的注册。
+
 ## Mailbox and task transactions
 
 Peer 通讯使用 Lead 日志 mailbox。投递前先追加并 flush `team/message/queued`。target message 会在持久 source metadata 与短模型可见前缀中同时携带稳定 message id 和 sender identity。只有 pending inbox 条目或已记录用户消息完成 flush，Lead 日志才写入 `team/message/delivered` acknowledgement。即时准入按 target 和 queued 日志顺序串行化，恢复按同一顺序重试 queued-minus-delivered，并在冷恢复前折叠 live 或 persisted target 的 inbox／历史状态。每个当前版本 Team payload 都会经过运行时验证后才进入 replay state。Team runtime 从同步准入到 settlement 全程跟踪 dispatch 与异步 acknowledgement 工作；dispose 会关闭准入，并在移除服务前等待两者。当前 waiter 只在所属 Team event flush 成功后被唤醒。
@@ -80,7 +84,7 @@ Web panel 读取 Lead Session 的 `agentTeam` 传输投影，因为现有投影�
 
 ## Testing
 
-Package test 以逐文件 100% coverage 覆盖身份、名字与权限检查、provider 选择、预留 id 持久化冲突、child-before-Lead flush 顺序、持久 provisioning 失败与 pending-inbox JSONL 对账、target-local 并发顺序、pending／history 去重、mailbox 限额、flush 后 notification、取消在途创建与 dispatch 的有界 dispose、failed member cleanup、task CAS 与 DAG 校验、write-scope warning、wait cancel／timeout、保留 inbox 的 interrupt、普通 fork 隔离、旧 control shadowing、声明 schema 的紧凑结果渲染与 scoped registration HMR。一条 keyless 产品快照会通过 `dsh --profile headless` 加载 Agent Teams profile bundle，并为两个 teammate、依赖任务、peer 投递、等待、完成和汇总固定完整的面向模型工具列表、Team policy 与持久 workflow 投影。CLI e2e 会复用同一个确定性 adapter，并验证带持久 Team 与 child 日志的正常退出。
+Package test 以逐文件 100% coverage 覆盖身份、名字与权限检查、provider 选择、逐个 teammate 的路由覆盖与策略门控的模型选择、预留 id 持久化冲突、child-before-Lead flush 顺序、持久 provisioning 失败与 pending-inbox JSONL 对账、target-local 并发顺序、pending／history 去重、mailbox 限额、flush 后 notification、取消在途创建与 dispatch 的有界 dispose、failed member cleanup、task CAS 与 DAG 校验、write-scope warning、wait cancel／timeout、保留 inbox 的 interrupt、普通 fork 隔离、旧 control shadowing、声明 schema 的紧凑结果渲染与 scoped registration HMR。一条 keyless 产品快照会通过 `dsh --profile headless` 加载 Agent Teams profile bundle，并为两个 teammate、依赖任务、peer 投递、等待、完成和汇总固定完整的面向模型工具列表、Team policy 与持久 workflow 投影。CLI e2e 会复用同一个确定性 adapter，并验证带持久 Team 与 child 日志的正常退出。
 
 模型可见的成员身份与可用状态遵循[工具投影决策](../simplification/2026-09-15-model-agent-availability-and-team-targets.zh.md)；服务驻留状态和持久身份仍保持区分。
 
