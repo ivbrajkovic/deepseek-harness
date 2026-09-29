@@ -3,6 +3,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type LlmRuntime from '@deepseek-ai/dsh-llm'
 import type { LlmProviderInfo } from '@deepseek-ai/dsh-llm'
+import type { ScopeKey } from '@deepseek-ai/dsh-scope'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ModelSelectionPolicy } from './model-selection.ts'
 
@@ -82,9 +83,10 @@ async function listSubagentModels(
  * Register `list_subagent_models` for one owning delegation-tool instance.
  * @param ctx - Context whose tool registry owns the fixed discovery definition.
  * @param policy - Route policy captured for this Session.
+ * @returns the registration's disposer.
  */
-export function registerListSubagentModels(ctx: Context, policy: ModelSelectionPolicy): void {
-  ctx.tools.register(defineTool({
+export function registerListSubagentModels(ctx: Context, policy: ModelSelectionPolicy): () => void {
+  return ctx.tools.register(defineTool({
     name: 'list_subagent_models',
     description:
       'Discover LLM routes for subagents without changing the current Agent. Call with no arguments to list '
@@ -110,4 +112,45 @@ export function registerListSubagentModels(ctx: Context, policy: ModelSelectionP
       return listSubagentModels(ctx, policy, args, exec.signal)
     },
   }))
+}
+
+/** Shared per-scope discovery registrations still held by at least one delegation tool. */
+const sharedDiscoveryTools = new WeakMap<ScopeKey, { count: number; dispose: () => void }>()
+
+/**
+ * Register `list_subagent_models` once per scope for every model-selectable
+ * delegation definition in that scope. Both the subagent tool and the Agent
+ * Teams tool expose route selection behind the same Session policy, so a
+ * composition that mounts both must still present exactly one discovery
+ * definition. The first caller's context owns the registration; every caller
+ * receives a disposer that releases its claim, and the last release removes
+ * the definition. An unscoped context falls back to a plain registration on
+ * that context.
+ * @param ctx - context owning the registration; prefer the consuming Agent's
+ * own context so plugin fiber disposal cannot remove a definition another tool still needs.
+ * @param scope - scope key shared by the co-mounted selection surfaces, or undefined without one.
+ * @param policy - Route policy captured for this Session.
+ * @returns the caller's release disposer.
+ */
+export function ensureListSubagentModels(
+  ctx: Context,
+  scope: ScopeKey | undefined,
+  policy: ModelSelectionPolicy,
+): () => void {
+  if (scope === undefined) return registerListSubagentModels(ctx, policy)
+  let shared = sharedDiscoveryTools.get(scope)
+  if (shared === undefined) {
+    shared = { count: 0, dispose: registerListSubagentModels(ctx, policy) }
+    sharedDiscoveryTools.set(scope, shared)
+  }
+  shared.count += 1
+  return () => {
+    const current = sharedDiscoveryTools.get(scope)
+    if (current === undefined) return
+    current.count -= 1
+    if (current.count === 0) {
+      sharedDiscoveryTools.delete(scope)
+      current.dispose()
+    }
+  }
 }

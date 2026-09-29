@@ -18,6 +18,18 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./model-selection": {
+      "types": "./lib/types/model-selection.d.ts",
+      "default": "./lib/model-selection.js"
+    },
+    "./model-selection-state": {
+      "types": "./lib/types/model-selection-state.d.ts",
+      "default": "./lib/model-selection-state.js"
+    },
+    "./list-models": {
+      "types": "./lib/types/list-models.d.ts",
+      "default": "./lib/list-models.js"
+    },
     "./model-selection-settings": {
       "types": "./lib/types/model-selection-settings.d.ts",
       "default": "./lib/model-selection-settings.js"
@@ -32,7 +44,10 @@
   "files": [
     "lib/index.js",
     "lib/invariant.js",
+    "lib/list-models.js",
+    "lib/model-selection.js",
     "lib/model-selection-settings.js",
+    "lib/model-selection-state.js",
     "lib/types/**/*.d.ts"
   ],
   "license": "MIT",

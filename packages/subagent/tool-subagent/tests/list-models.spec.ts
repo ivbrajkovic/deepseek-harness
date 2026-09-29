@@ -15,8 +15,9 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import { createScope, scopeOf } from '@deepseek-ai/dsh-scope'
 import * as tool from '../src/index.ts'
-import { registerListSubagentModels } from '../src/list-models.ts'
+import { ensureListSubagentModels, registerListSubagentModels } from '../src/list-models.ts'
 import { testToolSignal, text } from './harness.ts'
 
 class CatalogAdapter extends LlmAdapter {
@@ -246,5 +247,44 @@ describe('list_subagent_models', () => {
     const result = await call(ctx, { provider: 'missing' })
     expect(result.isError).toBe(true)
     expect(text(result)).toContain('available providers: (none)')
+  })
+})
+
+describe('ensureListSubagentModels', () => {
+  const POLICY = { routes: [{ provider: 'alpha', model: 'fast' }] }
+
+  it('falls back to a plain registration without a scope', async () => {
+    const ctx = await setupListTool()
+    expect(() => { registerListSubagentModels(ctx, POLICY) }).toThrow('already registered')
+    await ctx.fiber.dispose()
+
+    const bare = new Context()
+    await bare.plugin(LlmRuntime)
+    await bare.plugin(SystemPrompt)
+    await bare.plugin(ToolRuntime)
+    const release = ensureListSubagentModels(bare, undefined, POLICY)
+    expect(bare.tools.get('list_subagent_models')).toBeDefined()
+    release()
+    expect(bare.tools.get('list_subagent_models')).toBeUndefined()
+    await bare.fiber.dispose()
+  })
+
+  it('shares one definition per scope until the last release', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    const scope = createScope(ctx, { preset: 'shared-discovery' })
+    const key = scopeOf(scope.ctx)
+    const first = ensureListSubagentModels(ctx, key, POLICY)
+    const second = ensureListSubagentModels(ctx, key, POLICY)
+    expect(ctx.tools.get('list_subagent_models')).toBeDefined()
+    first()
+    expect(ctx.tools.get('list_subagent_models')).toBeDefined()
+    second()
+    expect(ctx.tools.get('list_subagent_models')).toBeUndefined()
+    // A release after the shared registration is exhausted is a no-op.
+    expect(() => { first() }).not.toThrow()
+    await ctx.fiber.dispose()
   })
 })

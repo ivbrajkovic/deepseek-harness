@@ -16,7 +16,6 @@ import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
-import { SessionSeq } from '@deepseek-ai/dsh-session'
 import type { Session } from '@deepseek-ai/dsh-session'
 import {
   assertSubagentMaxDepth,
@@ -33,12 +32,11 @@ import {
   requestedAgentOptions,
 } from './model-selection.ts'
 import type { DelegationModelRequest, ModelSelectionPolicy } from './model-selection.ts'
-import { registerListSubagentModels } from './list-models.ts'
+import { ensureListSubagentModels } from './list-models.ts'
 import type {} from './model-selection-settings.ts'
 import {
-  recordSubagentModelSelection,
+  sampleSessionModelSelectionPolicy,
   subagentModelSelectionProjectionDefinition,
-  subagentModelSelectionPolicy,
 } from './model-selection-state.ts'
 
 export const name = 'tool-subagent'
@@ -359,7 +357,6 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
 
   const install = (runtimeCtx: Context, modelSelectionPolicy: ModelSelectionPolicy | undefined): void => {
     const modelSelectionEnabled = modelSelectionPolicy !== undefined
-    if (modelSelectionPolicy !== undefined) registerListSubagentModels(runtimeCtx, modelSelectionPolicy)
     // Load order and HMR replacement can change provider availability while
     // this fiber remains active.
     let mounted: { subagentProvider: SubagentProvider; disposeTool: () => void } | undefined
@@ -617,37 +614,22 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
       + '@deepseek-ai/dsh-tool-subagent/model-selection-settings in the Host scope',
     )
   }
-  const selectForSession = (target: Session): ModelSelectionPolicy | undefined => {
-    const freshSession = target.firstLiveSeq === 0
-      // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
-      && target.eventAt(SessionSeq(0))?.type !== 'session/end-seed'
-    let allowedModels = subagentModelSelectionPolicy(ctx.sessionProjections, target)
-    if (allowedModels === undefined) {
-      const parentId = target.header.origin === 'subagent'
-        ? target.header.parentSession
-        : undefined
-      if (parentId !== undefined) {
-        const sessions = ctx.get('sessions')
-        if (sessions === undefined) {
-          throw new Error('tool-subagent: child model-selection inheritance requires the Session registry')
-        }
-        const parent = sessions.get(parentId)
-        allowedModels = parent === undefined
-          ? undefined
-          : subagentModelSelectionPolicy(ctx.sessionProjections, parent)
-      } else if (freshSession) {
-        const current = settings.current()
-        allowedModels = current.enabled ? current.allowedModels : undefined
-      }
-    }
-    if (allowedModels !== undefined) {
-      recordSubagentModelSelection(ctx.sessionProjections, target, allowedModels)
-    }
-    return allowedModels === undefined ? undefined : { routes: allowedModels }
-  }
+  const selectForSession = (target: Session): ModelSelectionPolicy | undefined =>
+    sampleSessionModelSelectionPolicy(
+      ctx.sessionProjections,
+      settings,
+      ctx.get('sessions'),
+      target,
+      'tool-subagent',
+    )
 
   if (session !== undefined) {
-    install(ctx, selectForSession(session))
+    const policy = selectForSession(session)
+    if (policy !== undefined) {
+      const release = ensureListSubagentModels(ctx, scopeOf(ctx), policy)
+      ctx.effect(() => release, 'tool-subagent.listSubagentModels()')
+    }
+    install(ctx, policy)
     return
   }
 
@@ -673,6 +655,12 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
     try {
       const policy = selectForSession(candidate.session)
       fiber = candidate.ctx.inject(['tools', 'subagents', 'systemPrompt'], (runtimeCtx) => {
+        if (policy !== undefined) {
+          // The Agent's own context owns the shared discovery definition, so
+          // this fiber's disposal releases only its claim.
+          const release = ensureListSubagentModels(candidate.ctx, scopeOf(candidate.ctx), policy)
+          runtimeCtx.effect(() => release, 'tool-subagent.listSubagentModels()')
+        }
         install(runtimeCtx, policy)
       })
     } finally {

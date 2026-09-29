@@ -1,10 +1,12 @@
 /** Durable per-session state for the user-controlled model-selection opt-in. */
 
 import { z as zod } from 'zod'
-import type { Session } from '@deepseek-ai/dsh-session'
+import { SessionSeq } from '@deepseek-ai/dsh-session'
+import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import { assertAllowedModelRoutes, type AllowedModelRoute } from './model-selection.ts'
+import type { ModelSelectionPolicy } from './model-selection.ts'
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
@@ -78,4 +80,67 @@ export function recordSubagentModelSelection(
   session.append('subagent/model-selection-policy', {
     allowedModels: allowedModels.map(route => ({ ...route })),
   })
+}
+
+/** Read-only projection registry source that owns the durable policy state. */
+export type ModelSelectionProjectionSource = Pick<SessionProjectionRegistry, 'stateOf'>
+
+/** Read-only Host settings source sampled for fresh top-level Sessions. */
+export interface ModelSelectionSettingsSource {
+  /** Read the current user preference for newly composed Sessions. */
+  current(): { readonly enabled: boolean; readonly allowedModels: readonly AllowedModelRoute[] }
+}
+
+/** Read-only Session registry source used for child policy inheritance. */
+export interface ModelSelectionSessionSource {
+  /** Resolve one live Session by durable identity. */
+  get(id: SessionId): Session | undefined
+}
+
+/**
+ * Resolve one Session's model-selection policy: its durable recorded decision
+ * when present, its parent's recorded decision for a subagent child, and the
+ * sampled Host setting for a fresh top-level Session. A resolved policy is
+ * recorded durably before it is returned, so the Session's delegation
+ * capability stays reconstructable from its log.
+ * @param projections - registry that owns the policy projection.
+ * @param settings - Host settings owner sampled for fresh Sessions.
+ * @param sessions - Session registry required when a child inherits its parent policy.
+ * @param session - Session receiving the model-selectable delegation definition.
+ * @param owner - plugin label for failure messages.
+ * @returns the Session's route policy, or undefined when selection stays off.
+ */
+export function sampleSessionModelSelectionPolicy(
+  projections: ModelSelectionProjectionSource,
+  settings: ModelSelectionSettingsSource,
+  sessions: ModelSelectionSessionSource | undefined,
+  session: Session,
+  owner: string,
+): ModelSelectionPolicy | undefined {
+  const freshSession = session.firstLiveSeq === 0
+    // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
+    && session.eventAt(SessionSeq(0))?.type !== 'session/end-seed'
+  let allowedModels: readonly AllowedModelRoute[] | undefined
+    = subagentModelSelectionPolicy(projections, session)
+  if (allowedModels === undefined) {
+    const parentId = session.header.origin === 'subagent'
+      ? session.header.parentSession
+      : undefined
+    if (parentId !== undefined) {
+      if (sessions === undefined) {
+        throw new Error(`${owner}: child model-selection inheritance requires the Session registry`)
+      }
+      const parent = sessions.get(parentId)
+      allowedModels = parent === undefined
+        ? undefined
+        : subagentModelSelectionPolicy(projections, parent)
+    } else if (freshSession) {
+      const current = settings.current()
+      allowedModels = current.enabled ? current.allowedModels : undefined
+    }
+  }
+  if (allowedModels !== undefined) {
+    recordSubagentModelSelection(projections, session, allowedModels)
+  }
+  return allowedModels === undefined ? undefined : { routes: allowedModels }
 }
