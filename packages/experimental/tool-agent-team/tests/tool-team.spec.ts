@@ -3,17 +3,23 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
+import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
-import { ToolCallId, createUserMessage } from '@deepseek-ai/dsh-llm'
-import { scopeOf } from '@deepseek-ai/dsh-scope'
+import { ReasoningEffortId, ToolCallId, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { scopeOf, createScope, bindScopeParent, scopeTarget } from '@deepseek-ai/dsh-scope'
 import { SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import SubagentService from '@deepseek-ai/dsh-subagent'
 import * as SubagentFork from '@deepseek-ai/dsh-subagent-fork-in-process'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
+import SubagentModelSelectionConfig from '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
+import * as toolSubagent from '@deepseek-ai/dsh-tool-subagent'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { renderPrompt, renderContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
 import * as ToolSubagentControl from '@deepseek-ai/dsh-tool-subagent-control'
 import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
@@ -82,6 +88,61 @@ async function setup(script: ConstructorParameters<typeof MockAdapter>[0], legac
   ctx.llm.registerAdapter(['mock'], adapter)
   const lead = await ctx.agentLoop.create(SessionId('tool-team-lead'), { provider: 'mock', model: 'mock' })
   return { ctx, lead, fiber, adapter }
+}
+
+/** Exact routes the selection setups authorize for explicit teammate choice. */
+const SELECTION_ALLOWED_MODELS = [
+  { provider: 'mock', model: 'mock' },
+  { provider: 'mock', model: 'mock-strong' },
+]
+
+/** Advertised reasoning efforts shared by every mock route. */
+const REASONING = {
+  efforts: [
+    { id: ReasoningEffortId('low'), name: 'Low' },
+    { id: ReasoningEffortId('high'), name: 'High' },
+  ],
+  defaultEffort: ReasoningEffortId('high'),
+} as const
+
+/** Mount the full Team service stack with the model-selection setting enabled. */
+async function setupSelectionStack(
+  ctx: Context,
+  allowedModels: readonly { readonly provider: string; readonly model: string }[] = SELECTION_ALLOWED_MODELS,
+): Promise<void> {
+  await ctx.plugin(SubagentModelSelectionConfig, { enabled: true, allowedModels: [...allowedModels] })
+  await mountAgentLoopTestDependencies(ctx)
+  const storageRoot = mkdtempSync(join(tmpdir(), 'dsh-tool-team-selection-'))
+  roots.push(storageRoot)
+  await ctx.plugin(JsonlSessionPersistence, { root: storageRoot })
+  await ctx.plugin(TestSessionQuery)
+  await ctx.plugin(AgentLoop, { agents: [] })
+  await ctx.plugin(SubagentService)
+  await ctx.plugin(SubagentSpawn, { providerName: 'spawn' })
+  await ctx.plugin(SubagentFork, { providerName: 'fork' })
+  await ctx.plugin(TeamService)
+}
+
+/** Mount the full selection-enabled stack plus the Team tool and its Lead. */
+async function setupSelection(
+  script: ConstructorParameters<typeof MockAdapter>[0],
+  allowedModels?: readonly { readonly provider: string; readonly model: string }[],
+) {
+  const ctx = new Context()
+  contexts.add(ctx)
+  await setupSelectionStack(ctx, allowedModels)
+  const fiber = await ctx.plugin(toolTeam, { modelSelectionSettings: true })
+  const adapter = new MockAdapter(script, REASONING)
+  ctx.llm.registerAdapter(['mock'], adapter)
+  const lead = await ctx.agentLoop.create(SessionId('tool-team-lead'), { provider: 'mock', model: 'mock' })
+  return { ctx, lead, fiber, adapter }
+}
+
+/** Read the declared parameter names of one scoped tool. */
+function parameterNames(ctx: Context, agent: Agent, toolName: string): Set<string> {
+  const schema = ctx.tools.get(toolName, scopeOf(agent.ctx))
+  const properties = (schema?.parameters as { properties?: Record<string, unknown> } | undefined)?.properties
+  return new Set(Object.keys(properties ?? {}))
 }
 
 function execute(
@@ -731,5 +792,170 @@ describe('dsh-tool-team', () => {
     const childId = spawnedChildId(ctx, lead, result)
     await vi.waitFor(() => { expect(ctx.agents.get(childId)).toBeUndefined() }, { timeout: 5_000 })
     expect(ctx.agentTeams.listMembers(lead)[1]).toMatchObject({ provider: 'team-fresh' })
+  })
+})
+
+describe('teammate model selection', () => {
+  it('exposes route fields, records the Session policy, and routes a spawned teammate', async () => {
+    const { ctx, lead, adapter } = await setupSelection(['hang'])
+    const spawnParameters = parameterNames(ctx, lead, 'spawn_teammate')
+    expect(spawnParameters.has('provider')).toBe(true)
+    expect(spawnParameters.has('model')).toBe(true)
+    expect(spawnParameters.has('reasoning_effort')).toBe(true)
+    expect(ctx.tools.get('list_subagent_models', scopeOf(lead.ctx))).toBeDefined()
+    expect(lead.session.snapshotEvents().some(event => event.type === 'subagent/model-selection-policy')).toBe(true)
+
+    const spawned = await execute(ctx, lead, 'spawn_teammate', {
+      name: 'routed-worker', description: 'routed work', prompt: 'finish',
+      provider: 'mock', model: 'mock-strong',
+    })
+    expect(spawned.isError, text(spawned)).toBe(false)
+    expect(JSON.parse(text(spawned))).toMatchObject({ member: { target: 'routed-worker', model: 'mock-strong' } })
+    const childId = spawnedChildId(ctx, lead, spawned)
+    const child = await waitRunning(ctx, childId)
+    expect(adapter.requests.find(request => request.sessionId === childId))
+      .toMatchObject({ provider: 'mock', model: 'mock-strong' })
+    // The teammate Session inherits the Lead's recorded policy decision and
+    // receives the same selection surface.
+    expect(child.session.snapshotEvents().some(event => event.type === 'subagent/model-selection-policy')).toBe(true)
+    expect((await assembly(ctx, child)).tools.some(schema => schema.name === 'list_subagent_models')).toBe(true)
+    const listed = JSON.parse(text(await execute(ctx, lead, 'list_agents', {}))) as Array<{ target: string; model?: string }>
+    expect(listed[1]).toMatchObject({ target: 'routed-worker', model: 'mock-strong' })
+    await execute(ctx, lead, 'interrupt_agent', { target: 'routed-worker' })
+    await waitNoAgent(ctx, childId)
+  })
+
+  it('applies a reasoning-effort override on the inherited Lead route', async () => {
+    const { ctx, lead } = await setupSelection(['hang'], [{ provider: 'mock', model: 'mock' }])
+    const spawned = await execute(ctx, lead, 'spawn_teammate', {
+      name: 'effort-worker', description: 'effort work', prompt: 'finish', reasoning_effort: 'low',
+    })
+    expect(spawned.isError, text(spawned)).toBe(false)
+    const childId = spawnedChildId(ctx, lead, spawned)
+    const child = await waitRunning(ctx, childId)
+    expect(child.options).toMatchObject({ provider: 'mock', model: 'mock', reasoningEffort: ReasoningEffortId('low') })
+    await execute(ctx, lead, 'interrupt_agent', { target: 'effort-worker' })
+    await waitNoAgent(ctx, childId)
+  })
+
+  it('rejects selection fields without a policy and routes outside the Session policy', async () => {
+    const disabled = await setup([])
+    expect(parameterNames(disabled.ctx, disabled.lead, 'spawn_teammate').has('provider')).toBe(false)
+    expect(disabled.ctx.tools.get('list_subagent_models', scopeOf(disabled.lead.ctx))).toBeUndefined()
+    const denied = await execute(disabled.ctx, disabled.lead, 'spawn_teammate', {
+      name: 'denied-worker', description: 'denied', prompt: 'no', provider: 'mock', model: 'mock-strong',
+    })
+    expect(denied.isError).toBe(true)
+    expect(text(denied)).toContain('child model selection is disabled for this tool instance')
+
+    const enabled = await setupSelection([])
+    const disallowed = await execute(enabled.ctx, enabled.lead, 'spawn_teammate', {
+      name: 'disallowed-worker', description: 'disallowed', prompt: 'no', provider: 'mock', model: 'other-model',
+    })
+    expect(disallowed.isError).toBe(true)
+    expect(text(disallowed)).toContain('is not allowed for this Session')
+  })
+
+  it('requires the Host settings owner and the session projection registry', async () => {
+    const withoutSettings = new Context()
+    contexts.add(withoutSettings)
+    await withoutSettings.plugin(SessionProjectionRegistry)
+    await withoutSettings.plugin(SystemPrompt)
+    await withoutSettings.plugin(ToolRuntime)
+    await withoutSettings.plugin(AgentRegistry)
+    withoutSettings.provide('agentTeams', { tryMembership: () => undefined } as never)
+    await expect(withoutSettings.plugin(toolTeam, { modelSelectionSettings: true }))
+      .rejects.toThrow('requires @deepseek-ai/dsh-tool-subagent/model-selection-settings')
+    await withoutSettings.fiber.dispose()
+
+    const withoutProjections = new Context()
+    contexts.add(withoutProjections)
+    await withoutProjections.plugin(SubagentModelSelectionConfig, {
+      enabled: true,
+      allowedModels: [...SELECTION_ALLOWED_MODELS],
+    })
+    await withoutProjections.plugin(SystemPrompt)
+    await withoutProjections.plugin(ToolRuntime)
+    await withoutProjections.plugin(AgentRegistry)
+    withoutProjections.provide('agentTeams', { tryMembership: () => undefined } as never)
+    await expect(withoutProjections.plugin(toolTeam, { modelSelectionSettings: true }))
+      .rejects.toThrow('requires the session projection registry')
+    await withoutProjections.fiber.dispose()
+  })
+
+  it('rejects model selection on providers without the agentOptions capability', async () => {
+    const incapable = () => ({
+      capabilities: { agentOptions: false, outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
+      inheritsParentContext: false,
+      start: async () => { throw new Error('never started') },
+    })
+
+    const initial = new Context()
+    contexts.add(initial)
+    await setupSelectionStack(initial)
+    initial.subagents.registerProvider({ name: 'incapable', ...incapable() })
+    await expect(initial.plugin(toolTeam, { freshProvider: 'incapable', modelSelectionSettings: true }))
+      .rejects.toThrow('does not support child model selection')
+    await initial.fiber.dispose()
+
+    const late = new Context()
+    contexts.add(late)
+    await setupSelectionStack(late)
+    await late.plugin(toolTeam, { freshProvider: 'late-incapable', modelSelectionSettings: true })
+    expect(() => late.subagents.registerProvider({ name: 'late-incapable', ...incapable() }))
+      .toThrow('does not support child model selection')
+    // A provider the Team never uses leaves the composition alone.
+    expect(() => late.subagents.registerProvider({ name: 'unrelated', ...incapable() })).not.toThrow()
+    await late.fiber.dispose()
+  })
+
+  it('reinstalls the selection surface across plugin HMR', async () => {
+    const { ctx, lead, fiber } = await setupSelection([])
+    const scope = scopeOf(lead.ctx)
+    await fiber.dispose()
+    expect(ctx.tools.get('list_subagent_models', scope)).toBeUndefined()
+    expect(ctx.tools.get('spawn_teammate', scope)).toBeUndefined()
+    const replacement = await ctx.plugin(toolTeam, { modelSelectionSettings: true })
+    expect(ctx.tools.get('list_subagent_models', scope)).toBeDefined()
+    expect(parameterNames(ctx, lead, 'spawn_teammate').has('provider')).toBe(true)
+    await replacement.dispose()
+  })
+
+  it('shares one discovery definition with a co-mounted subagent selection surface', async () => {
+    const ctx = new Context()
+    contexts.add(ctx)
+    await setupSelectionStack(ctx)
+    const preset = createScope(ctx, { preset: 'shared-selection' })
+    await preset.ctx.plugin(toolSubagent, {
+      provider: 'spawn',
+      modelSelectionSettings: true,
+      backgroundMode: 'continuable',
+    })
+    const teamFiber = await ctx.plugin(toolTeam, { modelSelectionSettings: true })
+    let binding: ReturnType<typeof bindScopeParent> | undefined
+    const handle = await ctx.agents.create({
+      sessionId: SessionId('shared-selection-lead'),
+      agentOptions: { provider: 'mock', model: 'mock' },
+      setup: (agentCtx) => {
+        binding = bindScopeParent(scopeOf(agentCtx)!, scopeOf(preset.ctx)!)
+      },
+    })
+    const lead = handle.agent
+    const scope = scopeOf(lead.ctx)
+    expect(ctx.tools.get('list_subagent_models', scope)).toBeDefined()
+    expect(parameterNames(ctx, lead, 'spawn_teammate').has('provider')).toBe(true)
+    expect(parameterNames(ctx, lead, 'subagent').has('provider')).toBe(true)
+
+    // Removing one selection surface leaves the shared definition with its holder.
+    await teamFiber.dispose()
+    expect(ctx.tools.get('spawn_teammate', scope)).toBeUndefined()
+    expect(ctx.tools.get('list_subagent_models', scope)).toBeDefined()
+
+    // The last claim's release removes the definition with the subagent surface.
+    const other = createScope(ctx, { preset: 'unshared' })
+    binding!.rebind(scopeOf(other.ctx)!)
+    ctx.emit(scopeTarget({}, scopeOf(preset.ctx)), 'tools/change')
+    await vi.waitFor(() => { expect(ctx.tools.get('subagent', scope)).toBeUndefined() })
+    expect(ctx.tools.get('list_subagent_models', scope)).toBeUndefined()
   })
 })
