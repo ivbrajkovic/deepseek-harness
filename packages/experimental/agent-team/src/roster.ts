@@ -14,12 +14,8 @@ import { readPersistedSession } from './persisted.ts'
 import type { TeamState } from './projection.ts'
 import { messageAccepted } from './session-message.ts'
 import { TeamId } from './types.ts'
-import type {
-  SpawnTeammateRequest,
-  SpawnTeammateResult,
-  TeamMemberSnapshot,
-  TeamMemberView,
-} from './types.ts'
+import type { TeamMemberSnapshot, TeamMemberView } from './types.ts'
+import type { SpawnTeammateRequest, SpawnTeammateResult } from './requests.ts'
 import { requiredText } from './validation.ts'
 
 const MEMBER_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
@@ -136,7 +132,7 @@ export class TeamRoster {
     }]
     for (const member of state.members) {
       const live = this.ctx.agents.get(member.id)
-      const model = live?.options.model ?? root.options.model
+      const model = member.model ?? live?.options.model ?? root.options.model
       result.push({
         id: member.id,
         name: member.name,
@@ -159,7 +155,7 @@ export class TeamRoster {
   /**
    * Create one named, continuable direct child of the Team Lead.
    * @param caller - exact live Lead Agent.
-   * @param request - immutable name, description, prompt, context mode, provider, and cancellation.
+   * @param request - immutable name, description, prompt, context mode, provider, optional child route overrides, and cancellation.
    * @returns the active roster row.
    */
   async spawn(caller: Agent, request: SpawnTeammateRequest): Promise<SpawnTeammateResult> {
@@ -269,6 +265,7 @@ export class TeamRoster {
         request: {
           prompt: request.prompt,
           parent: root,
+          ...request.agentOptions === undefined ? {} : { agentOptions: request.agentOptions },
         },
         signal,
       })
@@ -294,9 +291,15 @@ export class TeamRoster {
       }
       throw error
     }
+    const liveModel = this.ctx.agents.get(childId)?.options.model
     const active = {
       ...member,
       phase: 'active' as const,
+      /* v8 ignore next -- a child that passed the initial-prompt checkpoint resolved a
+       * model route for its first turn; only a deployment default-model route can
+       * materialize that child without creation-time options, and no test stack
+       * mounts one. */
+      ...liveModel === undefined ? {} : { model: liveModel },
     } satisfies TeamMemberSnapshot
     // Once the continuation accepted its first prompt, it is a real child. If
     // this checkpoint fails, keep the in-memory active edge instead of inventing
@@ -381,6 +384,7 @@ export class TeamRoster {
       if (this.ctx.agents.get(member.id) !== undefined) continue
       let phase: 'active' | 'failed' = 'failed'
       let failure = 'provisioning did not leave a resumable child Session'
+      let model: string | undefined
       try {
         const loaded = await readPersistedSession(this.ctx.sessionPersistence, member.id, signal)
         const suffix = loaded.events.slice(loaded.inheritedEventCount)
@@ -391,6 +395,7 @@ export class TeamRoster {
           && descriptor.provider === member.provider
           && acceptedInitialPrompt) {
           phase = 'active'
+          model = descriptor.agentModel
         } else {
           failure = 'persisted child Session does not match the provisioned continuation'
         }
@@ -406,6 +411,7 @@ export class TeamRoster {
           ...current,
           phase,
           ...phase === 'failed' ? { error: failure } : {},
+          ...model === undefined ? {} : { model },
         }
         await this.journal.appendAndFlush(root, 'team/member', {
           version: 2,
@@ -419,6 +425,7 @@ export class TeamRoster {
   /** Build one runtime member row after successful creation. */
   private memberView(member: TeamMemberSnapshot & { readonly phase: 'active' }): TeamMemberView {
     const live = this.ctx.agents.get(member.id)
+    const model = member.model ?? live?.options.model
     return {
       id: member.id,
       name: member.name,
@@ -427,7 +434,7 @@ export class TeamRoster {
       description: member.description,
       provider: member.provider,
       context: member.context,
-      ...live?.options.model === undefined ? {} : { model: live.options.model },
+      ...model === undefined ? {} : { model },
       diagnostics: [],
     }
   }

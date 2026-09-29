@@ -1,6 +1,7 @@
 /** One-shot Team change waiters independent of durable state projection. */
 
-import type { TeamId, TeamWaitResult } from './types.ts'
+import type { TeamId } from './types.ts'
+import type { TeamWaitResult } from './requests.ts'
 import { errorMessage, TeamError } from './error.ts'
 
 interface Waiter {

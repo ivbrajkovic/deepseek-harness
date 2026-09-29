@@ -9,12 +9,8 @@ import { resolveActiveMember } from './roster.ts'
 import { assertTaskGraphCandidate, TeamTaskGraphError } from './task-graph.ts'
 import type { TeamTaskGraphViolation } from './task-graph.ts'
 import { TeamId, TeamTaskId } from './types.ts'
-import type {
-  CreateTeamTaskRequest,
-  TeamTaskSnapshot,
-  TeamTaskView,
-  UpdateTeamTaskRequest,
-} from './types.ts'
+import type { TeamTaskSnapshot, TeamTaskView } from './types.ts'
+import type { CreateTeamTaskRequest, UpdateTeamTaskRequest } from './requests.ts'
 import { projectTaskView, taskReady } from './task-view.ts'
 import { requiredText, writeScope } from './validation.ts'
 
