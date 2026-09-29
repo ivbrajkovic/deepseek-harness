@@ -36,6 +36,10 @@ Root 恢复时会把未终结 provisioning 记录与独立持久 child Session �
 
 fresh child 不继承对话。fork child 只捕获一次 Lead 已完成 turn 前缀，并保留为自己的持久 seed。当前 delegation turn 保持排除，与既有 fork provider 契约一致。
 
+## Teammate LLM routes
+
+`spawnTeammate` 接收可选的 child `AgentOptions`，并经由 continuation manager 自身的 `agentOptions` 路径转发，因此解析后的路由会持久化在 child 的 subagent descriptor 中并在冷恢复时还原，Team 侧不存储路由。active `team/member` 快照只记录解析后的 `model` 用于 roster 展示；早于该字段写入的快照按原样重放。模型可见的选择复用 subagent 工具的机制：Team 工具通过自身的 `modelSelection` 开关暴露同样的 `provider`、`model` 和 `reasoning_effort` 字段，在执行时读取 Lead Session 持久化的 `subagent/model-selection-policy` 决策，并执行同一个路由白名单，因此同一条记录策略治理两个委派入口。共享的 `list_subagent_models` 发现工具仍是部署侧注册：每个 scope 只在一个选择入口上启用 `modelDiscovery`。插件挂载时对两个配置的 continuable provider 断言能力；两个进程内 continuable provider 都声明 `agentOptions`，之后注册的缺少该能力的 provider 会拒绝自己的注册。
+
 ## Mailbox and task transactions
 
 历史 Lead-log mailbox 仍是可读格式：queued 与 delivered 记录保留稳定身份与发送者，Team payload 校验仍适用于它们。Team 不再投递或确认这些记录；新发送遵循[直接 inbox 决策](../simplification/2026-09-26-team-direct-inbox.zh.md)。
@@ -80,7 +84,7 @@ Web panel 读取 Lead Session 的 `agentTeam` 传输投影，因为现有投影�
 
 ## Testing
 
-包测试覆盖 Team 权限、provisioning 持久性、任务转换、直接 inbox 接收、发送者归属、生命周期取消和历史 mailbox 可读性。无密钥 Team profile 快照固定 policy、工具与工作流；CLI 组合测试检查持久 Team 和 child 日志。
+包测试覆盖 Team 权限、provisioning 持久性、任务转换、直接 inbox 接收、发送者归属、逐个 teammate 的路由覆盖与策略门控的模型选择、生命周期取消和历史 mailbox 可读性。无密钥 Team profile 快照固定 policy、工具与工作流；CLI 组合测试检查持久 Team 和 child 日志。
 
 模型可见的成员身份与可用状态遵循[工具投影说明](../../../../packages/experimental/tool-agent-team/README.zh.md)；服务驻留状态和持久身份仍保持区分。
 

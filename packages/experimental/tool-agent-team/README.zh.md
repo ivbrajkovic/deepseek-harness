@@ -33,7 +33,7 @@ kind: "package-reference"
 
 ### 最小工作示例
 
-对现有组合的最小增量是 [agent-team README](../agent-team/README.zh.md#smallest-working-setup) 中的两包片段：持久会话存储、团队领域包与本包。插件本身只有两个可选设置：
+对现有组合的最小增量是 [agent-team README](../agent-team/README.zh.md#smallest-working-setup) 中的两包片段：持久会话存储、团队领域包与本包。插件本身只有三个可选设置：
 
 ```yaml
 - id: tool-agent-team
@@ -41,12 +41,16 @@ kind: "package-reference"
   config:
     freshProvider: spawn
     forkProvider: fork
+    modelSelectionSettings: true
 ```
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|
 | `freshProvider` | `spawn` | 启动 fresh teammate 的提供方 |
 | `forkProvider` | `fork` | 启动 fork teammate 的提供方 |
+| `modelSelectionSettings` | `false` | 为每个新的 Lead Session 采样 Host 的 `subagent-model-selection` 设置，并在 teammate Session 中继承该决定；要求 Host scope 中挂载 `@deepseek-ai/dsh-tool-subagent/model-selection-settings` |
+
+启用 `modelSelectionSettings` 后，采样策略允许选择的 Session 会为 `spawn_teammate` 增加可选的 `provider`、`model` 与 `reasoning_effort` 字段，并挂载共享的 `list_subagent_models` 发现工具；同一用户设置与白名单同时治理普通 subagent 工具，因此一个开关控制两个委派入口。
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-experimental-tool-agent-team)是每个受支持字段及其 JSDoc 的穷尽式真源。
 
@@ -56,7 +60,7 @@ kind: "package-reference"
 
 九个工具分为四类能力：
 
-- **创建 teammate**——`spawn_teammate` 接收名字、描述与初始任务；只有 Lead 可以调用它。
+- **创建 teammate**——`spawn_teammate` 接收名字、描述与初始任务；只有 Lead 可以调用它。当 Session 策略允许选择时，它还接收可选的 `provider`、`model` 与 `reasoning_effort` 字段，用于把 teammate 路由到不同的 LLM；省略的字段继承 Lead 路由。
 - **发送消息**——`send_message` 在最近的步骤边界对运行中的成员进行 steering（中途引导）、启动或恢复非活动成员。
 - **查看与等待**——`list_agents` 返回各成员的 `target` 与可用状态；`wait_agent` 等待下一次团队变化；`interrupt_agent` 停止 teammate 的当前轮次（仅限 Lead）。
 - **管理任务板**——`team_task_create`、`team_task_list`、`team_task_get` 与 `team_task_update` 添加、浏览、读取与更新共享任务。
@@ -124,7 +128,7 @@ member scope 上的一个 `team:policy` 段落说明共享的协作规则；固�
 
 #### 模型看到什么
 
-共享系统 policy 覆盖 Team 可用性、共享 cwd 安全、任务协调、Steer 投递、inbox 接收和 Lead 等待责任。Lead 与 teammate 使用相同的九个 schema；执行时落实 Lead-only 操作。必需的 runtime context 声明 `You are the Team Lead named "lead".`，或 `You are teammate "<name>".` 与 `Your Team Lead is named "lead".`，并提供 roster 和消息操作说明。身份来自当前 Team membership，关闭可选 context 时仍保留，压缩移除快照后会恢复。从 teammate 创建的普通 fork 会收到当前 Lead 身份。
+共享系统 policy 覆盖 Team 可用性、共享 cwd 安全、任务协调、Steer 投递、inbox 接收和 Lead 等待责任。Lead 与 teammate 使用相同的九个 schema；执行时落实 Lead-only 操作。启用 `modelSelection` 的部署会为 `spawn_teammate` 增加 teammate 路由字段；`modelDiscovery` 注册共享的 `list_subagent_models` 发现工具。显式路由会在执行时对照 Lead Session 持久化的 `subagent/model-selection-policy` 决策校验，省略的路由值继承 Lead 路由。必需的 runtime context 声明 `You are the Team Lead named "lead".`，或 `You are teammate "<name>".` 与 `Your Team Lead is named "lead".`，并提供 roster 和消息操作说明。身份来自当前 Team membership，关闭可选 context 时仍保留，压缩移除快照后会恢复。从 teammate 创建的普通 fork 会收到当前 Lead 身份。
 
 #### Token 影响
 

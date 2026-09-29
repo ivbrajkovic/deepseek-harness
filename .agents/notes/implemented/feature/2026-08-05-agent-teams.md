@@ -36,6 +36,10 @@ A root recovery reconciles an unterminated provisioning record against the child
 
 Fresh children have no inherited conversation. Fork children capture the Lead's completed-turn prefix once and retain it as their own durable seed. The current delegation turn remains excluded, matching the existing fork provider contract.
 
+## Teammate LLM routes
+
+`spawnTeammate` accepts optional child `AgentOptions` and forwards them through the continuation manager's own `agentOptions` path, so the resolved route is persisted in the child's subagent descriptor and restored on cold resume without Team-side route storage. The active `team/member` snapshot records only the resolved `model` for roster display; a snapshot written before this field replays unchanged. The model-facing selection reuses the subagent tool's machinery: the Team tool exposes the same `provider`, `model`, and `reasoning_effort` fields behind its own `modelSelection` opt-in, reads the Lead Session's durable `subagent/model-selection-policy` decision at execute time, and enforces the same route allowlist, so one recorded policy governs both delegation surfaces. The shared `list_subagent_models` discovery tool stays a deployment-owned registration: enable `modelDiscovery` on exactly one selection surface per scope. Provider capability is asserted at plugin mount for both configured continuable providers; both in-process continuable providers declare `agentOptions`, and a provider registered later without it rejects its own registration.
+
 ## Mailbox and task transactions
 
 The historical Lead-log mailbox remains a readable format: queued and delivered records keep their stable identity and sender, and Team payload validation still applies to them. Team no longer delivers or acknowledges them; new sends follow the [direct inbox decision](../simplification/2026-09-26-team-direct-inbox.md).
@@ -80,7 +84,7 @@ Publication requires `apply` to return a new state object per applied Team event
 
 ## Testing
 
-Package tests cover Team authority, provisioning durability, task transitions, direct inbox acceptance, sender attribution, lifecycle cancellation, and historical mailbox readability. The keyless Team profile snapshot pins the policy, tools, and workflow; the CLI composition test checks persisted Team and child logs.
+Package tests cover Team authority, provisioning durability, task transitions, direct inbox acceptance, sender attribution, per-teammate route overrides with policy-gated model selection, lifecycle cancellation, and historical mailbox readability. The keyless Team profile snapshot pins the policy, tools, and workflow; the CLI composition test checks persisted Team and child logs.
 
 Model-facing member identities and availability follow the [tool projection reference](../../../../packages/experimental/tool-agent-team/README.md); service residency and durable identity remain distinct.
 

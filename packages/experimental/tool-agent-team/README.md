@@ -33,7 +33,7 @@ Choose it when the model should create and coordinate teammates by itself rather
 
 ### Smallest working example
 
-The smallest addition to an existing composition is the two-package fragment from the [agent-team README](../agent-team/README.md#smallest-working-setup): durable session storage, the team domain package, and this package. The plugin itself takes two optional settings:
+The smallest addition to an existing composition is the two-package fragment from the [agent-team README](../agent-team/README.md#smallest-working-setup): durable session storage, the team domain package, and this package. The plugin itself takes three optional settings:
 
 ```yaml
 - id: tool-agent-team
@@ -41,12 +41,16 @@ The smallest addition to an existing composition is the two-package fragment fro
   config:
     freshProvider: spawn
     forkProvider: fork
+    modelSelectionSettings: true
 ```
 
 | Field | Default | Meaning |
 |---|---|---|
 | `freshProvider` | `spawn` | Provider that starts fresh teammates |
 | `forkProvider` | `fork` | Provider that starts fork teammates |
+| `modelSelectionSettings` | `false` | Sample the Host `subagent-model-selection` setting for each new Lead Session and inherit that decision in teammate Sessions; requires `@deepseek-ai/dsh-tool-subagent/model-selection-settings` in the Host scope |
+
+With `modelSelectionSettings` enabled, a Session whose sampled policy allows selection adds optional `provider`, `model`, and `reasoning_effort` fields to `spawn_teammate` plus the shared `list_subagent_models` discovery tool; the same user setting and allowlist govern the plain subagent tool, so one toggle controls both delegation surfaces.
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-experimental-tool-agent-team) is the exhaustive source for every accepted field and its JSDoc.
 
@@ -56,7 +60,7 @@ Try it by asking the Lead model: "create a teammate named reviewer to check the 
 
 The nine tools group into four capabilities:
 
-- **Create a teammate** — `spawn_teammate` takes a name, a description, and the initial task; only the Lead can call it.
+- **Create a teammate** — `spawn_teammate` takes a name, a description, and the initial task; only the Lead can call it. When the Session's policy allows selection, it also takes optional `provider`, `model`, and `reasoning_effort` fields that route the teammate onto a different LLM; omitted fields inherit the Lead route.
 - **Send messages** — `send_message` steers a running member at its nearest step boundary, starts or resumes an inactive member.
 - **See and wait** — `list_agents` returns each member’s `target` and availability; `wait_agent` waits for the next team change; `interrupt_agent` stops a teammate's current turn (Lead only).
 - **Manage the task board** — `team_task_create`, `team_task_list`, `team_task_get`, and `team_task_update` add, browse, read, and update shared tasks.
@@ -124,7 +128,7 @@ Read these pages when the package-level contract is not enough. They move from t
 
 #### What the model sees
 
-One shared system policy covers Team availability, shared-cwd safety, task coordination, Steer delivery, inbox acceptance, and the Lead’s duty to wait. All nine schemas are identical for Leads and teammates; execution enforces Lead-only operations. Required runtime context states `You are the Team Lead named "lead".` or `You are teammate "<name>".` with `Your Team Lead is named "lead".`, plus roster and messaging instructions. Identity comes from current Team membership, survives optional-context suppression, and is restored when compaction removes its snapshot. An ordinary fork from a teammate receives its current Lead identity.
+One shared system policy covers Team availability, shared-cwd safety, task coordination, Steer delivery, inbox acceptance, and the Lead’s duty to wait. All nine schemas are identical for Leads and teammates; execution enforces Lead-only operations. A deployment that enables `modelSelection` adds the teammate route fields to `spawn_teammate`; `modelDiscovery` registers the shared `list_subagent_models` discovery tool. Explicit routes are validated against the Lead Session’s durable `subagent/model-selection-policy` decision at execute time, and omitted route values inherit the Lead route. Required runtime context states `You are the Team Lead named "lead".` or `You are teammate "<name>".` with `Your Team Lead is named "lead".`, plus roster and messaging instructions. Identity comes from current Team membership, survives optional-context suppression, and is restored when compaction removes its snapshot. An ordinary fork from a teammate receives its current Lead identity.
 
 #### Token effect
 

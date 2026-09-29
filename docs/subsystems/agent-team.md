@@ -17,6 +17,8 @@ interface TeamMemberSnapshot {
   readonly provider: string
   readonly context: 'fresh' | 'fork'
   readonly phase: TeamMemberPhase
+  /** Child model resolved at creation; the full route stays in the child's own subagent descriptor. */
+  readonly model?: string
   readonly error?: string
 }
 ```
@@ -156,7 +158,7 @@ listMembers(agent: Agent): TeamMemberView[]
 /**
  * Create one named, continuable direct child of the Team Lead.
  * @param caller - exact live Lead Agent.
- * @param request - immutable name, description, prompt, context mode, provider, and cancellation.
+ * @param request - immutable name, description, prompt, context mode, provider, optional child route overrides, and cancellation.
  * @returns the active roster row.
  */
 async spawnTeammate(caller: Agent, request: SpawnTeammateRequest): Promise<SpawnTeammateResult>
