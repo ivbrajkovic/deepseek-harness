@@ -6,7 +6,8 @@
 
 import type { AgentOptions } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
-import type { TeamMessageId, TeamMemberView, TeamTaskId } from './types.ts'
+import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
+import type { TeamMemberView, TeamTaskId } from './types.ts'
 
 /** Input for creating one durable teammate. */
 export interface SpawnTeammateRequest {
@@ -31,17 +32,16 @@ export interface SpawnTeammateResult {
   readonly member: TeamMemberView
 }
 
-/** Input for one durable peer message. */
+/** Input for one direct peer-message attempt. */
 export interface SendTeamMessageRequest {
   readonly target: string
   readonly content: ContentBlock[]
   readonly signal: AbortSignal
 }
 
-/** Result after a peer message enters the durable mailbox. */
+/** Target inbox acceptance under ordinary Agent persistence; no Team retry or deduplication. */
 export interface SendTeamMessageResult {
-  readonly messageId: TeamMessageId
-  readonly status: 'accepted' | 'queued'
+  readonly messageId: MessageId
 }
 
 /** Input for creating one shared task. */

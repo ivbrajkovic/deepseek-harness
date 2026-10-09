@@ -9,11 +9,14 @@ const entry = (path: string) => ({
   fixedExtension: false,
   dts: false,
   clean: false,
+  deps: { neverBundle: ['./list-models.js', './model-selection.js', './model-selection-state.js'] },
 })
 
-/** Build self-contained Loader entries so the package needs no private chunks. */
+/** Build Loader entries and shared selection modules with one discovery registry. */
 export default defineConfig([
   entry('lib/types/index.js'),
+  entry('lib/types/list-models.js'),
+  entry('lib/types/model-selection.js'),
+  entry('lib/types/model-selection-state.js'),
   entry('lib/types/model-selection-settings.js'),
-  entry('lib/types/invariant.js'),
 ])
